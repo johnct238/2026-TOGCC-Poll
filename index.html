@@ -1,0 +1,126 @@
+<!-- ... existing code ... -->
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TOGCC - Real-Time QR Polling App</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+<!-- ... existing code ... -->
+        <!-- Top App Header -->
+        <header class="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 sticky top-0 z-40 transition-colors">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white flex items-center justify-center font-extrabold shadow-md shadow-indigo-500/25">
+                        <i data-lucide="bar-chart-3" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h1 class="text-base font-black tracking-tight text-slate-900 dark:text-white">TOGCC Live Poll</h1>
+                            <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200/50 dark:border-indigo-800/50">PRO</span>
+                        </div>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Secure Category &amp; Free-Text Polling</p>
+                    </div>
+                    <span id="connection-badge" class="ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+<!-- ... existing code ... -->
+    <!-- Firebase SDK + Application Logic -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, increment, runTransaction, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ==========================================
+        // 1. STATE & CONFIGURATION
+        // ==========================================
+        const DEFAULT_POLL_ID = 'TOGCC-101';
+        const INITIAL_SEED_POLL = {
+            id: DEFAULT_POLL_ID,
+            code: DEFAULT_POLL_ID,
+            question: "TOGCC Summit: Pick a category and share your specific idea or request:",
+            options: [
+                {
+                    id: 'cat_1',
+                    text: 'Product & New Features',
+                    prompt: 'What specific feature or workflow should we build next for TOGCC members?',
+                    votes: 4
+                },
+                {
+                    id: 'cat_2',
+                    text: 'Performance & Bug Fixes',
+                    prompt: 'Which slowdown or issue bothers you the most?',
+                    votes: 3
+                },
+                {
+                    id: 'cat_3',
+                    text: 'Team Culture & Events',
+                    prompt: 'What networking session or social event would you enjoy at TOGCC?',
+                    votes: 3
+                },
+                {
+                    id: 'cat_4',
+                    text: 'Tools & Workspace Setup',
+                    prompt: 'Which software tool or hardware upgrade would help your daily work?',
+                    votes: 2
+                }
+            ],
+            responses: [
+                { id: 'r1', categoryId: 'cat_1', text: 'Offline mobile sync mode for conference attendees', createdAt: Date.now() - 420000 },
+                { id: 'r2', categoryId: 'cat_1', text: 'One-click CSV and PDF executive export for TOGCC reports', createdAt: Date.now() - 360000 },
+                { id: 'r3', categoryId: 'cat_1', text: 'Slack & Teams instant webhook notifications', createdAt: Date.now() - 300000 },
+                { id: 'r4', categoryId: 'cat_2', text: 'Faster dashboard load time on large datasets', createdAt: Date.now() - 210000 },
+                { id: 'r5', categoryId: 'cat_3', text: 'Monthly Friday board-game & networking lunch', createdAt: Date.now() - 120000 },
+                { id: 'r6', categoryId: 'cat_4', text: 'Shared Figma + AI coding assistant licenses', createdAt: Date.now() - 20000 }
+            ],
+            isLocked: false,
+            showResults: true,
+            blockedAttempts: 0,
+            voters: {}, // Map of { [deviceFingerprint]: { categoryId, freeText, votedAt } }
+            createdAt: Date.now()
+        };
+
+        // In-memory application state
+        let state = {
+            polls: {
+                [DEFAULT_POLL_ID]: JSON.parse(JSON.stringify(INITIAL_SEED_POLL))
+            },
+            activeHostPollId: DEFAULT_POLL_ID,
+            activeVoterPollId: DEFAULT_POLL_ID,
+// ... existing code ...
+        window.handleManualCodeJoin = async function(e) {
+            e.preventDefault();
+            const raw = document.getElementById('input-join-code').value.trim().toUpperCase();
+            if (!raw) return;
+
+            const normalized = raw.startsWith('TOGCC-') || raw.startsWith('POLL-') ? raw : `TOGCC-${raw}`;
+            let foundPoll = state.polls[raw] || state.polls[normalized];
+
+            // If not in local memory, perform a single-read fetch (no continuous subscription)
+            if (!foundPoll && db && isCloudReady) {
+                try {
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'polls', normalized);
+                    const docSnap = await getDoc(docRef);
+                    if (docSnap.exists()) {
+                        foundPoll = docSnap.data();
+                        if (!Array.isArray(foundPoll.responses)) foundPoll.responses = [];
+                        state.polls[foundPoll.id] = foundPoll;
+                    }
+                } catch (err) {
+                    console.warn('Single-fetch poll error:', err);
+                }
+            }
+
+            if (!foundPoll) {
+                showToast(`Poll "${raw}" not found. Check the code on screen.`, 'warning');
+                return;
+            }
+
+            state.activeVoterPollId = foundPoll.id;
+            state.selectedCategoryId = null;
+            state.freeTextAnswer = '';
+            document.getElementById('input-join-code').value = '';
+            renderParticipantView();
+        };
+
+        window.submitParticipantVote = async function() {
+// ... existing code ...
