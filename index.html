@@ -1,5 +1,159 @@
-<!-- ... existing code ... -->
-        // In-memory application state
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TOGCC - Real-Time QR Polling App</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- QRCode.js for dynamic QR codes -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="h-full bg-slate-950 text-slate-100 antialiased overflow-x-hidden selection:bg-indigo-500 selection:text-white">
+
+    <!-- Incognito / Private Browsing Blocker Overlay -->
+    <div id="incognito-overlay" class="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-4 hidden">
+        <div class="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center space-y-6 shadow-2xl">
+            <div class="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-2xl flex items-center justify-center mx-auto border border-rose-500/20">
+                <i data-lucide="shield-alert" class="w-8 h-8"></i>
+            </div>
+            <div class="space-y-2">
+                <h2 class="text-xl font-black text-white">Private Browsing Detected</h2>
+                <p class="text-sm text-slate-400">TOGCC secure polling prevents duplicate votes using device verification. Incognito or Private mode is not supported.</p>
+            </div>
+            <div class="p-4 bg-slate-950 rounded-2xl border border-slate-800 text-xs text-slate-300">
+                Please open this link in a <strong>standard browser tab</strong> (Safari, Chrome, or Edge) to cast your vote.
+            </div>
+            <div class="space-y-3">
+                <button onclick="copyPollLink()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2">
+                    <i data-lucide="copy" class="w-4 h-4"></i> Copy Poll Link
+                </button>
+                <button onclick="disableSimulatedIncognito()" class="text-xs text-slate-500 hover:text-slate-400 underline">
+                    (Dismiss Demo Overlay)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fullscreen QR Modal -->
+    <div id="fullscreen-qr-modal" class="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-6 hidden">
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 max-w-lg w-full text-center space-y-6 shadow-2xl relative">
+            <button onclick="toggleFullscreenQR()" class="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
+                <i data-lucide="x" class="w-6 h-6"></i>
+            </button>
+            <div class="space-y-2">
+                <span class="px-3 py-1 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 font-bold text-xs rounded-full">TOGCC Live Projector</span>
+                <h2 class="text-2xl font-black text-slate-900 dark:text-white">Scan to Vote Instantly</h2>
+                <p class="text-xs text-slate-500 dark:text-slate-400">Point your smartphone camera at the code below</p>
+            </div>
+            <div id="modal-qrcode-container" class="bg-white p-6 rounded-2xl inline-block shadow-inner border border-slate-100"></div>
+            <div class="bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl flex items-center justify-between border border-slate-200 dark:border-slate-700">
+                <div class="text-left">
+                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Join Code</div>
+                    <div id="modal-display-code" class="text-xl font-black font-mono text-indigo-600 dark:text-indigo-400 tracking-wider">TOGCC</div>
+                </div>
+                <button onclick="copyPollLink()" class="px-4 py-2 bg-indigo-600 text-white font-bold text-xs rounded-xl hover:bg-indigo-700 transition-colors shadow-sm">
+                    Copy Link
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App Container -->
+    <div class="min-h-full flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+        
+        <!-- Top App Header -->
+        <header class="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 sticky top-0 z-40">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white flex items-center justify-center font-extrabold shadow-md shadow-indigo-500/25">
+                        <i data-lucide="bar-chart-3" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h1 class="text-base font-black tracking-tight text-slate-900 dark:text-white">TOGCC Live Poll</h1>
+                            <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200/50 dark:border-indigo-800/50">PRO</span>
+                        </div>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Secure Category &amp; Free-Text Polling</p>
+                    </div>
+                    <span id="connection-badge" class="ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                        <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Local Ready
+                    </span>
+                </div>
+
+                <!-- View Mode Switcher -->
+                <div class="flex items-center bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <button onclick="switchView('host')" id="btn-view-host" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm">
+                        🖥️ Host Projector
+                    </button>
+                    <button onclick="switchView('voter')" id="btn-view-voter" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">
+                        📱 Voter View
+                    </button>
+                    <button onclick="switchView('split')" id="btn-view-split" class="hidden sm:block px-3 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white">
+                        ⚡ Split Demo
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col lg:flex-row gap-6">
+            
+            <!-- Host Dashboard View Container -->
+            <div id="view-host-container" class="w-full">
+                <div id="view-host" class="space-y-6">
+                    <!-- Host controls & stats will render here -->
+                </div>
+            </div>
+
+            <!-- Voter Booth View Container -->
+            <div id="view-voter-container" class="w-full hidden max-w-xl mx-auto">
+                <div id="view-voter" class="space-y-6">
+                    <!-- Voter ballot will render here -->
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- Firebase SDK + Application Logic -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, increment, runTransaction, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ==========================================
+        // 1. STATE & SEED DATA
+        // ==========================================
+        const DEFAULT_POLL_ID = "TOGCC";
+        
+        const INITIAL_SEED_POLL = {
+            id: DEFAULT_POLL_ID,
+            code: DEFAULT_POLL_ID,
+            question: "What is your primary focus for TOGCC this quarter?",
+            isLocked: false,
+            options: [
+                { id: 'cat_1', text: 'Product & Features', prompt: 'Which upcoming feature or capability is most critical?', votes: 42 },
+                { id: 'cat_2', text: 'Performance & Scalability', prompt: 'What bottlenecks or scaling areas should we prioritize?', votes: 35 },
+                { id: 'cat_3', text: 'Community & Ecosystem', prompt: 'How can we improve developer or partner engagement?', votes: 28 },
+                { id: 'cat_4', text: 'Operations & Governance', prompt: 'What process or operational enhancement is needed?', votes: 19 }
+            ],
+            voters: {},
+            responses: [
+                { id: 'res-1', categoryId: 'cat_1', text: 'Real-time multi-region replication and low latency.', createdAt: Date.now() - 3600000 },
+                { id: 'res-2', categoryId: 'cat_2', text: 'Better caching for high traffic peak spikes.', createdAt: Date.now() - 7200000 }
+            ]
+        };
+
         let state = {
             polls: {
                 [DEFAULT_POLL_ID]: JSON.parse(JSON.stringify(INITIAL_SEED_POLL))
@@ -16,23 +170,55 @@
         let db = null;
         let auth = null;
         let isCloudReady = false;
-        let unsubscribeHostListener = null;
-
-        // Device fingerprint cache & anti-incognito detection
-        let cachedFingerprint = null;
+        let cachedFingerprint = 'device-' + Math.random().toString(36).substring(2, 12);
         let isIncognitoDetected = false;
 
         // ==========================================
-        // 2. INITIALIZATION & STORAGE & INCOGNITO CHECK
+        // 2. DEVICE FINGERPRINTING & INCOGNITO CHECK
+        // ==========================================
+        async function detectIncognitoBrowser() {
+            try {
+                if ('storage' in navigator && 'estimate' in navigator.storage) {
+                    const estimate = await navigator.storage.estimate();
+                    if (estimate.quota && estimate.quota < 120 * 1024 * 1024 * 1024) {
+                        isIncognitoDetected = false; // standard threshold
+                    }
+                }
+            } catch (e) {
+                // Ignore
+            }
+        }
+
+        async function generateDeviceFingerprint() {
+            try {
+                const nav = window.navigator;
+                const screen = window.screen;
+                const raw = [
+                    nav.userAgent,
+                    nav.language,
+                    screen.colorDepth,
+                    screen.width + 'x' + screen.height,
+                    new Date().getTimezoneOffset(),
+                    nav.hardwareConcurrency || 'unknown'
+                ].join('###');
+
+                const encoder = new TextEncoder();
+                const data = encoder.encode(raw);
+                const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                return 'fp-' + hashHex.substring(0, 24);
+            } catch (e) {
+                return 'fp-' + Math.random().toString(36).substring(2, 15);
+            }
+        }
+
+        // ==========================================
+        // 3. INITIALIZATION
         // ==========================================
         async function initApp() {
-            try {
-                await detectIncognitoBrowser();
-                cachedFingerprint = await generateDeviceFingerprint();
-            } catch (e) {
-                console.warn('Init security checks warning:', e);
-                cachedFingerprint = 'device-' + Math.random().toString(36).substring(2, 10);
-            }
+            await detectIncognitoBrowser();
+            cachedFingerprint = await generateDeviceFingerprint();
 
             try {
                 if (typeof __firebase_config !== 'undefined' && __firebase_config) {
@@ -50,19 +236,12 @@
                     isCloudReady = true;
                     document.getElementById('connection-badge').className = "ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300";
                     document.getElementById('connection-badge').innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Cloud Live`;
-                    
-                    // Sync initial poll to cloud if missing
-                    await syncInitialPollToCloud();
-                } else {
-                    console.info('Running in Local-Only memory mode.');
                 }
             } catch (err) {
-                console.warn('Cloud sync initialization failed. Using local storage.', err);
-                document.getElementById('connection-badge').className = "ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300";
-                document.getElementById('connection-badge').innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Local Mode`;
+                console.info('Running in Local memory mode.');
             }
 
-            // Parse URL parameters for direct polling or demo modes
+            // Parse URL parameters
             const urlParams = new URLSearchParams(window.location.search);
             const pollParam = urlParams.get('poll');
             const viewParam = urlParams.get('view');
@@ -82,63 +261,46 @@
                 state.viewMode = viewParam;
             }
 
-            // Start Host real-time listener if in host or split mode
-            setupHostListener();
-
-            // Initial render
             renderApp();
-
-            // Setup QR code rendering
-            updateQRCodes();
-        }
-
-        async function syncInitialPollToCloud() {
-            if (!db || !isCloudReady) return;
-            try {
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const pollRef = doc(db, 'artifacts', appId, 'public', 'data', 'polls', DEFAULT_POLL_ID);
-                const snap = await getDoc(pollRef);
-                if (!snap.exists()) {
-                    await setDoc(pollRef, INITIAL_SEED_POLL);
-                }
-            } catch (e) {
-                console.warn('Failed syncing seed poll:', e);
-            }
         }
 
         // ==========================================
-        // 3. RENDER CORE CONTROLLER
+        // 4. RENDER CONTROLLER
         // ==========================================
         window.renderApp = function() {
             try {
-                const hostView = document.getElementById('view-host');
-                const voterView = document.getElementById('view-voter');
+                const hostContainer = document.getElementById('view-host-container');
+                const voterContainer = document.getElementById('view-voter-container');
                 const incognitoOverlay = document.getElementById('incognito-overlay');
+                const btnHost = document.getElementById('btn-view-host');
+                const btnVoter = document.getElementById('btn-view-voter');
+                const btnSplit = document.getElementById('btn-view-split');
 
-                if (!hostView || !voterView || !incognitoOverlay) {
-                    console.error('Core view elements missing from DOM');
-                    return;
-                }
-
-                // Check Incognito restriction
                 if (isIncognitoDetected || state.isSimulatingIncognito) {
                     incognitoOverlay.classList.remove('hidden');
                 } else {
                     incognitoOverlay.classList.add('hidden');
                 }
 
-                // Render based on active view mode
+                // Reset button active states
+                if (btnHost) btnHost.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white";
+                if (btnVoter) btnVoter.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white";
+                if (btnSplit) btnSplit.className = "hidden sm:block px-3 py-1.5 rounded-lg text-xs font-bold transition-all text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white";
+
                 if (state.viewMode === 'host') {
-                    hostView.classList.remove('hidden');
-                    voterView.classList.add('hidden');
+                    hostContainer.className = "w-full";
+                    voterContainer.className = "hidden";
+                    if (btnHost) btnHost.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm";
                     renderHostDashboard();
                 } else if (state.viewMode === 'voter') {
-                    hostView.classList.add('hidden');
-                    voterView.classList.remove('hidden');
+                    hostContainer.className = "hidden";
+                    voterContainer.className = "w-full max-w-xl mx-auto";
+                    if (btnVoter) btnVoter.className = "px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm";
                     renderParticipantView();
                 } else if (state.viewMode === 'split') {
-                    hostView.classList.remove('hidden');
-                    voterView.classList.remove('hidden');
+                    hostContainer.className = "w-full lg:w-1/2";
+                    voterContainer.className = "w-full lg:w-1/2 max-w-xl mx-auto";
+                    if (btnSplit) btnSplit.className = "hidden sm:block px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm";
                     renderHostDashboard();
                     renderParticipantView();
                 }
@@ -153,25 +315,400 @@
 
         window.switchView = function(mode) {
             state.viewMode = mode;
-            const hostContainer = document.getElementById('view-host-container');
-            const voterContainer = document.getElementById('view-voter-container');
-
-            if (hostContainer && voterContainer) {
-                if (mode === 'host') {
-                    hostContainer.className = "w-full";
-                    voterContainer.className = "hidden";
-                } else if (mode === 'voter') {
-                    hostContainer.className = "hidden";
-                    voterContainer.className = "w-full max-w-xl mx-auto";
-                } else if (mode === 'split') {
-                    hostContainer.className = "w-full lg:w-1/2 border-r border-slate-200 dark:border-slate-800";
-                    voterContainer.className = "w-full lg:w-1/2 max-w-xl mx-auto";
-                }
-            }
             renderApp();
         };
 
-        // Run application on load
+        // ==========================================
+        // 5. HOST DASHBOARD RENDERER
+        // ==========================================
+        window.renderHostDashboard = function() {
+            const container = document.getElementById('view-host');
+            if (!container) return;
+
+            const poll = state.polls[state.activeHostPollId] || state.polls[DEFAULT_POLL_ID];
+            const totalVotes = poll.options.reduce((sum, o) => sum + (o.votes || 0), 0);
+
+            let html = `
+                <div class="space-y-6">
+                    <!-- Host Top Controls Banner -->
+                    <div class="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <div class="flex items-center gap-4">
+                            <div class="w-12 h-12 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center font-bold text-lg">
+                                ${poll.code || poll.id}
+                            </div>
+                            <div>
+                                <h2 class="text-base font-black text-slate-900 dark:text-white">${escapeHtml(poll.question)}</h2>
+                                <p class="text-xs text-slate-500 dark:text-slate-400">Total Submissions: <span class="font-bold text-indigo-600 dark:text-indigo-400">${totalVotes}</span> • Status: <span class="font-bold ${poll.isLocked ? 'text-rose-500' : 'text-emerald-500'}">${poll.isLocked ? 'Locked' : 'Active'}</span></p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <button onclick="toggleLockPoll()" class="px-4 py-2 rounded-xl text-xs font-bold border ${poll.isLocked ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'} transition-colors">
+                                ${poll.isLocked ? '🔓 Unlock Voting' : '🔒 Lock Voting'}
+                            </button>
+                            <button onclick="toggleFullscreenQR()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors flex items-center gap-1.5">
+                                <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i> Project QR
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Host Main Grid -->
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        
+                        <!-- Left 2 Cols: Category Results & Free Text Wall -->
+                        <div class="lg:col-span-2 space-y-6">
+                            <!-- Category Percentage Bars -->
+                            <div class="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+                                <h3 class="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">Category Breakdown</h3>
+                                <div class="space-y-4">
+            `;
+
+            poll.options.forEach(opt => {
+                const count = opt.votes || 0;
+                const pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
+                html += `
+                    <div class="space-y-1.5">
+                        <div class="flex items-center justify-between text-xs">
+                            <span class="font-bold text-slate-800 dark:text-slate-200">${escapeHtml(opt.text)}</span>
+                            <span class="font-semibold text-slate-500">${count} votes (${pct}%)</span>
+                        </div>
+                        <div class="w-full bg-slate-100 dark:bg-slate-800 h-3 rounded-full overflow-hidden">
+                            <div class="bg-gradient-to-r from-indigo-500 to-violet-600 h-full rounded-full transition-all duration-500" style="width: ${pct}%"></div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `
+                                </div>
+                            </div>
+
+                            <!-- Live Free-Text Responses Wall -->
+                            <div class="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-4">
+                                <div class="flex items-center justify-between">
+                                    <h3 class="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">Participant Free-Text Wall</h3>
+                                    <span class="text-xs font-semibold px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded-full text-slate-600 dark:text-slate-400">${(poll.responses || []).length} responses</span>
+                                </div>
+                                <div class="space-y-3 max-h-[350px] overflow-y-auto pr-1">
+            `;
+
+            if (!poll.responses || poll.responses.length === 0) {
+                html += `<div class="p-8 text-center text-xs text-slate-400 italic">No responses submitted yet. Scan the QR code to submit answers!</div>`;
+            } else {
+                poll.responses.forEach(res => {
+                    const cat = poll.options.find(o => o.id === res.categoryId);
+                    html += `
+                        <div class="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 space-y-2">
+                            <div class="flex items-center justify-between text-[11px]">
+                                <span class="font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded">${escapeHtml(cat ? cat.text : 'General')}</span>
+                                <span class="text-slate-400">${new Date(res.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                            </div>
+                            <p class="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">"${escapeHtml(res.text)}"</p>
+                        </div>
+                    `;
+                });
+            }
+
+            html += `
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Col: QR Card & Join Info -->
+                        <div class="space-y-6">
+                            <div class="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 shadow-sm text-center space-y-4">
+                                <h3 class="text-sm font-black text-slate-900 dark:text-white">Scan to Vote</h3>
+                                <div id="host-qrcode-container" class="bg-white p-4 rounded-2xl inline-block shadow-sm border border-slate-100 mx-auto"></div>
+                                <div class="space-y-1">
+                                    <div class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Join Code</div>
+                                    <div class="text-2xl font-black font-mono text-indigo-600 dark:text-indigo-400">${poll.code || poll.id}</div>
+                                </div>
+                                <button onclick="copyPollLink()" class="w-full py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white font-bold text-xs rounded-xl transition-colors">
+                                    📋 Copy Direct Voting Link
+                                </button>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            `;
+
+            container.innerHTML = html;
+            generateQRCodeImages();
+        };
+
+        // ==========================================
+        // 6. PARTICIPANT / VOTER RENDERER
+        // ==========================================
+        window.renderParticipantView = function() {
+            const container = document.getElementById('voter-view-content') || document.getElementById('view-voter');
+            if (!container) return;
+
+            const poll = state.polls[state.activeVoterPollId] || state.polls[DEFAULT_POLL_ID];
+            const hasVoted = poll.voters && cachedFingerprint && poll.voters[cachedFingerprint];
+
+            let html = `
+                <div class="space-y-6">
+                    <div class="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                            <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">Active Poll:</span>
+                            <span class="text-xs font-bold text-slate-900 dark:text-white px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded font-mono">${poll.code || poll.id}</span>
+                        </div>
+                        <form onsubmit="handleManualCodeJoin(event)" class="flex items-center gap-1.5">
+                            <input type="text" id="input-join-code" placeholder="Join Code..." class="w-28 px-2.5 py-1 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                            <button type="submit" class="px-2.5 py-1 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors shadow-sm">Join</button>
+                        </form>
+                    </div>
+            `;
+
+            if (poll.isLocked) {
+                html += `
+                    <div class="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-2xl p-8 text-center space-y-3">
+                        <div class="w-12 h-12 bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400 rounded-full flex items-center justify-center mx-auto">
+                            <i data-lucide="lock" class="w-6 h-6"></i>
+                        </div>
+                        <h3 class="text-base font-bold text-amber-900 dark:text-amber-200">Voting is currently locked</h3>
+                        <p class="text-xs text-amber-700 dark:text-amber-400 max-w-sm mx-auto">The host has paused incoming submissions for this poll.</p>
+                    </div>
+                `;
+            } else if (hasVoted && !state.isSimulatingIncognito) {
+                const myVote = poll.voters[cachedFingerprint];
+                const catObj = poll.options.find(o => o.id === myVote.categoryId);
+                html += `
+                    <div class="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl p-6 text-center space-y-4">
+                        <div class="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto">
+                            <i data-lucide="check-circle-2" class="w-6 h-6"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-black text-emerald-900 dark:text-emerald-200">Vote Recorded Successfully!</h3>
+                            <p class="text-xs text-emerald-700 dark:text-emerald-400 mt-1">Thank you for participating in TOGCC.</p>
+                        </div>
+                        <div class="bg-white/80 dark:bg-slate-900/80 rounded-xl p-4 text-left border border-emerald-100 dark:border-emerald-900/40 space-y-2">
+                            <div class="flex items-center justify-between text-xs font-semibold text-slate-500">
+                                <span>Category:</span>
+                                <span class="text-indigo-600 dark:text-indigo-400 font-bold">${catObj ? catObj.text : 'General'}</span>
+                            </div>
+                            <div class="text-xs text-slate-700 dark:text-slate-300 italic bg-slate-50 dark:bg-slate-800/60 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                                "${escapeHtml(myVote.freeText)}"
+                            </div>
+                        </div>
+                        <button onclick="resetMyVoteDemo()" class="text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 underline pt-2">
+                            🔄 Reset my vote (Testing Demo)
+                        </button>
+                    </div>
+                `;
+            } else {
+                html += `
+                    <div class="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-6">
+                        <div>
+                            <span class="inline-block px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 mb-2">Step 1 of 2: Choose Category</span>
+                            <h2 class="text-lg font-black text-slate-900 dark:text-white leading-snug">${escapeHtml(poll.question)}</h2>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                `;
+
+                poll.options.forEach(opt => {
+                    const isSelected = state.selectedCategoryId === opt.id;
+                    html += `
+                        <button type="button" onclick="selectVoterCategory('${opt.id}')" class="text-left p-4 rounded-xl border-2 transition-all cursor-pointer ${isSelected ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/40 dark:border-indigo-500 shadow-sm' : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900'}">
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="text-xs font-bold uppercase tracking-wider ${isSelected ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-500 dark:text-slate-400'}">${escapeHtml(opt.text)}</span>
+                                <div class="w-5 h-5 rounded-full border flex items-center justify-center ${isSelected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 dark:border-slate-700'}">
+                                    ${isSelected ? '<i data-lucide="check" class="w-3 h-3"></i>' : ''}
+                                </div>
+                            </div>
+                            <p class="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">${escapeHtml(opt.prompt)}</p>
+                        </button>
+                    `;
+                });
+
+                html += `</div>`;
+
+                if (state.selectedCategoryId) {
+                    const activeOpt = poll.options.find(o => o.id === state.selectedCategoryId);
+                    html += `
+                        <div class="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800">
+                            <span class="inline-block px-2.5 py-1 rounded-full text-xs font-bold bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-300">Step 2 of 2: Your Free-Text Input</span>
+                            <label class="block text-xs font-medium text-slate-700 dark:text-slate-300">${escapeHtml(activeOpt ? activeOpt.prompt : 'Type your answer:')}</label>
+                            <textarea id="voter-freetext-input" rows="3" maxlength="240" oninput="updateFreeTextState(this.value)" placeholder="Type your suggestion or response here..." class="w-full p-3 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500">${escapeHtml(state.freeTextAnswer)}</textarea>
+                            <div class="flex items-center justify-between">
+                                <span class="text-[11px] text-slate-400">Max 240 chars</span>
+                                <button type="button" onclick="submitParticipantVote()" class="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-500/25 transition-all">
+                                    🚀 Submit Vote
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                html += `</div>`;
+            }
+
+            html += `</div>`;
+            container.innerHTML = html;
+        };
+
+        // ==========================================
+        // 7. ACTIONS & HELPERS
+        // ==========================================
+        window.selectVoterCategory = function(catId) {
+            state.selectedCategoryId = catId;
+            renderParticipantView();
+        };
+
+        window.updateFreeTextState = function(val) {
+            state.freeTextAnswer = val;
+        };
+
+        window.resetMyVoteDemo = function() {
+            if (cachedFingerprint) {
+                const poll = state.polls[state.activeVoterPollId];
+                if (poll && poll.voters) delete poll.voters[cachedFingerprint];
+            }
+            state.selectedCategoryId = null;
+            state.freeTextAnswer = '';
+            renderParticipantView();
+        };
+
+        window.submitParticipantVote = function() {
+            if (!state.selectedCategoryId) {
+                showToast('Please select a category first.', 'warning');
+                return;
+            }
+            const textVal = state.freeTextAnswer.trim();
+            if (!textVal) {
+                showToast('Please enter your response in the text box.', 'warning');
+                return;
+            }
+
+            const pollId = state.activeVoterPollId;
+            const poll = state.polls[pollId];
+            if (!poll) return;
+
+            if (!poll.voters) poll.voters = {};
+            if (!poll.responses) poll.responses = [];
+
+            poll.voters[cachedFingerprint] = {
+                categoryId: state.selectedCategoryId,
+                freeText: textVal,
+                votedAt: Date.now()
+            };
+
+            const opt = poll.options.find(o => o.id === state.selectedCategoryId);
+            if (opt) opt.votes = (opt.votes || 0) + 1;
+
+            poll.responses.unshift({
+                id: 'res-' + Math.random().toString(36).substring(2, 9),
+                categoryId: state.selectedCategoryId,
+                text: textVal,
+                createdAt: Date.now()
+            });
+
+            showToast('Vote submitted successfully!', 'success');
+            renderApp();
+        };
+
+        window.toggleLockPoll = function() {
+            const poll = state.polls[state.activeHostPollId];
+            if (poll) {
+                poll.isLocked = !poll.isLocked;
+                renderApp();
+                showToast(poll.isLocked ? 'Poll voting locked.' : 'Poll voting unlocked.', 'info');
+            }
+        };
+
+        window.toggleFullscreenQR = function() {
+            const modal = document.getElementById('fullscreen-qr-modal');
+            if (modal) {
+                modal.classList.toggle('hidden');
+                if (!modal.classList.contains('hidden')) {
+                    const target = document.getElementById('modal-qrcode-container');
+                    if (target && window.QRCode) {
+                        target.innerHTML = '';
+                        new QRCode(target, {
+                            text: window.location.href.split('?')[0] + '?poll=' + state.activeHostPollId,
+                            width: 220,
+                            height: 220
+                        });
+                    }
+                }
+            }
+        };
+
+        window.copyPollLink = function() {
+            const url = window.location.href.split('?')[0] + '?poll=' + state.activeHostPollId;
+            const textarea = document.createElement('textarea');
+            textarea.value = url;
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                showToast('Copied polling link to clipboard!', 'success');
+            } catch (err) {
+                showToast('Could not copy link.', 'error');
+            }
+            document.body.removeChild(textarea);
+        };
+
+        window.handleManualCodeJoin = function(e) {
+            e.preventDefault();
+            const input = document.getElementById('input-join-code');
+            if (!input) return;
+            const code = input.value.trim().toUpperCase();
+            if (!code) return;
+
+            state.activeVoterPollId = code;
+            if (!state.polls[code]) {
+                state.polls[code] = JSON.parse(JSON.stringify(INITIAL_SEED_POLL));
+                state.polls[code].id = code;
+                state.polls[code].code = code;
+            }
+            renderParticipantView();
+            showToast(`Joined poll ${code}`, 'success');
+        };
+
+        window.disableSimulatedIncognito = function() {
+            state.isSimulatingIncognito = false;
+            renderApp();
+        };
+
+        function generateQRCodeImages() {
+            const hostContainer = document.getElementById('host-qrcode-container');
+            if (hostContainer && window.QRCode) {
+                hostContainer.innerHTML = '';
+                new QRCode(hostContainer, {
+                    text: window.location.href.split('?')[0] + '?poll=' + state.activeHostPollId,
+                    width: 140,
+                    height: 140
+                });
+            }
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            const bgColors = type === 'success' ? 'bg-emerald-600 text-white' : type === 'warning' ? 'bg-amber-600 text-white' : 'bg-slate-900 text-white border border-slate-800';
+            toast.className = `px-4 py-3 rounded-2xl shadow-xl text-xs font-bold transition-all duration-300 animate-fadeIn ${bgColors}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        // Run on load
         window.addEventListener('DOMContentLoaded', () => {
             initApp();
         });
