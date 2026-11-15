@@ -1,83 +1,4 @@
 <!-- ... existing code ... -->
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TOGCC - Real-Time QR Polling App</title>
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Lucide Icons -->
-<!-- ... existing code ... -->
-        <!-- Top App Header -->
-        <header class="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 sticky top-0 z-40 transition-colors">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-                <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white flex items-center justify-center font-extrabold shadow-md shadow-indigo-500/25">
-                        <i data-lucide="bar-chart-3" class="w-5 h-5"></i>
-                    </div>
-                    <div>
-                        <div class="flex items-center gap-2">
-                            <h1 class="text-base font-black tracking-tight text-slate-900 dark:text-white">TOGCC Live Poll</h1>
-                            <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200/50 dark:border-indigo-800/50">PRO</span>
-                        </div>
-                        <p class="text-xs text-slate-500 dark:text-slate-400">Secure Category &amp; Free-Text Polling</p>
-                    </div>
-                    <span id="connection-badge" class="ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-<!-- ... existing code ... -->
-    <!-- Firebase SDK + Application Logic -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, increment, runTransaction, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // ==========================================
-        // 1. STATE & CONFIGURATION
-        // ==========================================
-        const DEFAULT_POLL_ID = 'TOGCC-101';
-        const INITIAL_SEED_POLL = {
-            id: DEFAULT_POLL_ID,
-            code: DEFAULT_POLL_ID,
-            question: "TOGCC Summit: Pick a category and share your specific idea or request:",
-            options: [
-                {
-                    id: 'cat_1',
-                    text: 'Product & New Features',
-                    prompt: 'What specific feature or workflow should we build next for TOGCC members?',
-                    votes: 4
-                },
-                {
-                    id: 'cat_2',
-                    text: 'Performance & Bug Fixes',
-                    prompt: 'Which slowdown or issue bothers you the most?',
-                    votes: 3
-                },
-                {
-                    id: 'cat_3',
-                    text: 'Team Culture & Events',
-                    prompt: 'What networking session or social event would you enjoy at TOGCC?',
-                    votes: 3
-                },
-                {
-                    id: 'cat_4',
-                    text: 'Tools & Workspace Setup',
-                    prompt: 'Which software tool or hardware upgrade would help your daily work?',
-                    votes: 2
-                }
-            ],
-            responses: [
-                { id: 'r1', categoryId: 'cat_1', text: 'Offline mobile sync mode for conference attendees', createdAt: Date.now() - 420000 },
-                { id: 'r2', categoryId: 'cat_1', text: 'One-click CSV and PDF executive export for TOGCC reports', createdAt: Date.now() - 360000 },
-                { id: 'r3', categoryId: 'cat_1', text: 'Slack & Teams instant webhook notifications', createdAt: Date.now() - 300000 },
-                { id: 'r4', categoryId: 'cat_2', text: 'Faster dashboard load time on large datasets', createdAt: Date.now() - 210000 },
-                { id: 'r5', categoryId: 'cat_3', text: 'Monthly Friday board-game & networking lunch', createdAt: Date.now() - 120000 },
-                { id: 'r6', categoryId: 'cat_4', text: 'Shared Figma + AI coding assistant licenses', createdAt: Date.now() - 20000 }
-            ],
-            isLocked: false,
-            showResults: true,
-            blockedAttempts: 0,
-            voters: {}, // Map of { [deviceFingerprint]: { categoryId, freeText, votedAt } }
-            createdAt: Date.now()
-        };
-
         // In-memory application state
         let state = {
             polls: {
@@ -85,42 +6,176 @@
             },
             activeHostPollId: DEFAULT_POLL_ID,
             activeVoterPollId: DEFAULT_POLL_ID,
-// ... existing code ...
-        window.handleManualCodeJoin = async function(e) {
-            e.preventDefault();
-            const raw = document.getElementById('input-join-code').value.trim().toUpperCase();
-            if (!raw) return;
-
-            const normalized = raw.startsWith('TOGCC-') || raw.startsWith('POLL-') ? raw : `TOGCC-${raw}`;
-            let foundPoll = state.polls[raw] || state.polls[normalized];
-
-            // If not in local memory, perform a single-read fetch (no continuous subscription)
-            if (!foundPoll && db && isCloudReady) {
-                try {
-                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'polls', normalized);
-                    const docSnap = await getDoc(docRef);
-                    if (docSnap.exists()) {
-                        foundPoll = docSnap.data();
-                        if (!Array.isArray(foundPoll.responses)) foundPoll.responses = [];
-                        state.polls[foundPoll.id] = foundPoll;
-                    }
-                } catch (err) {
-                    console.warn('Single-fetch poll error:', err);
-                }
-            }
-
-            if (!foundPoll) {
-                showToast(`Poll "${raw}" not found. Check the code on screen.`, 'warning');
-                return;
-            }
-
-            state.activeVoterPollId = foundPoll.id;
-            state.selectedCategoryId = null;
-            state.freeTextAnswer = '';
-            document.getElementById('input-join-code').value = '';
-            renderParticipantView();
+            viewMode: 'host', // 'host', 'voter', 'split'
+            isSimulatingIncognito: false,
+            selectedCategoryId: null,
+            freeTextAnswer: '',
+            copied: false
         };
 
-        window.submitParticipantVote = async function() {
-// ... existing code ...
+        let db = null;
+        let auth = null;
+        let isCloudReady = false;
+        let unsubscribeHostListener = null;
+
+        // Device fingerprint cache & anti-incognito detection
+        let cachedFingerprint = null;
+        let isIncognitoDetected = false;
+
+        // ==========================================
+        // 2. INITIALIZATION & STORAGE & INCOGNITO CHECK
+        // ==========================================
+        async function initApp() {
+            try {
+                await detectIncognitoBrowser();
+                cachedFingerprint = await generateDeviceFingerprint();
+            } catch (e) {
+                console.warn('Init security checks warning:', e);
+                cachedFingerprint = 'device-' + Math.random().toString(36).substring(2, 10);
+            }
+
+            try {
+                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                    const firebaseConfig = JSON.parse(__firebase_config);
+                    const app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+
+                    const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                    if (token) {
+                        await signInWithCustomToken(auth, token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                    isCloudReady = true;
+                    document.getElementById('connection-badge').className = "ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300";
+                    document.getElementById('connection-badge').innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Cloud Live`;
+                    
+                    // Sync initial poll to cloud if missing
+                    await syncInitialPollToCloud();
+                } else {
+                    console.info('Running in Local-Only memory mode.');
+                }
+            } catch (err) {
+                console.warn('Cloud sync initialization failed. Using local storage.', err);
+                document.getElementById('connection-badge').className = "ml-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300";
+                document.getElementById('connection-badge').innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Local Mode`;
+            }
+
+            // Parse URL parameters for direct polling or demo modes
+            const urlParams = new URLSearchParams(window.location.search);
+            const pollParam = urlParams.get('poll');
+            const viewParam = urlParams.get('view');
+
+            if (pollParam) {
+                const upperPoll = pollParam.toUpperCase();
+                state.activeVoterPollId = upperPoll;
+                if (!state.polls[upperPoll]) {
+                    state.polls[upperPoll] = JSON.parse(JSON.stringify(INITIAL_SEED_POLL));
+                    state.polls[upperPoll].id = upperPoll;
+                    state.polls[upperPoll].code = upperPoll;
+                }
+                state.viewMode = 'voter';
+            }
+
+            if (viewParam === 'voter' || viewParam === 'host' || viewParam === 'split') {
+                state.viewMode = viewParam;
+            }
+
+            // Start Host real-time listener if in host or split mode
+            setupHostListener();
+
+            // Initial render
+            renderApp();
+
+            // Setup QR code rendering
+            updateQRCodes();
+        }
+
+        async function syncInitialPollToCloud() {
+            if (!db || !isCloudReady) return;
+            try {
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const pollRef = doc(db, 'artifacts', appId, 'public', 'data', 'polls', DEFAULT_POLL_ID);
+                const snap = await getDoc(pollRef);
+                if (!snap.exists()) {
+                    await setDoc(pollRef, INITIAL_SEED_POLL);
+                }
+            } catch (e) {
+                console.warn('Failed syncing seed poll:', e);
+            }
+        }
+
+        // ==========================================
+        // 3. RENDER CORE CONTROLLER
+        // ==========================================
+        window.renderApp = function() {
+            try {
+                const hostView = document.getElementById('view-host');
+                const voterView = document.getElementById('view-voter');
+                const incognitoOverlay = document.getElementById('incognito-overlay');
+
+                if (!hostView || !voterView || !incognitoOverlay) {
+                    console.error('Core view elements missing from DOM');
+                    return;
+                }
+
+                // Check Incognito restriction
+                if (isIncognitoDetected || state.isSimulatingIncognito) {
+                    incognitoOverlay.classList.remove('hidden');
+                } else {
+                    incognitoOverlay.classList.add('hidden');
+                }
+
+                // Render based on active view mode
+                if (state.viewMode === 'host') {
+                    hostView.classList.remove('hidden');
+                    voterView.classList.add('hidden');
+                    renderHostDashboard();
+                } else if (state.viewMode === 'voter') {
+                    hostView.classList.add('hidden');
+                    voterView.classList.remove('hidden');
+                    renderParticipantView();
+                } else if (state.viewMode === 'split') {
+                    hostView.classList.remove('hidden');
+                    voterView.classList.remove('hidden');
+                    renderHostDashboard();
+                    renderParticipantView();
+                }
+
+                if (window.lucide && typeof window.lucide.createIcons === 'function') {
+                    window.lucide.createIcons();
+                }
+            } catch (err) {
+                console.error('RenderApp error:', err);
+            }
+        };
+
+        window.switchView = function(mode) {
+            state.viewMode = mode;
+            const hostContainer = document.getElementById('view-host-container');
+            const voterContainer = document.getElementById('view-voter-container');
+
+            if (hostContainer && voterContainer) {
+                if (mode === 'host') {
+                    hostContainer.className = "w-full";
+                    voterContainer.className = "hidden";
+                } else if (mode === 'voter') {
+                    hostContainer.className = "hidden";
+                    voterContainer.className = "w-full max-w-xl mx-auto";
+                } else if (mode === 'split') {
+                    hostContainer.className = "w-full lg:w-1/2 border-r border-slate-200 dark:border-slate-800";
+                    voterContainer.className = "w-full lg:w-1/2 max-w-xl mx-auto";
+                }
+            }
+            renderApp();
+        };
+
+        // Run application on load
+        window.addEventListener('DOMContentLoaded', () => {
+            initApp();
+        });
+    </script>
+</body>
+</html>
+```eof
