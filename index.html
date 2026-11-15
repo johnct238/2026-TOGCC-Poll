@@ -10,6 +10,9 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- QRCode.js for dynamic QR codes -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <!-- Firebase Compat SDK for seamless zero-build Cloud Sync across 300+ devices -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -64,6 +67,37 @@
         </div>
     </div>
 
+    <!-- Cloud Sync Setup Modal (Host Only - Connects 300+ phones via Firebase) -->
+    <div id="cloud-setup-modal" class="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-xl flex items-center justify-center p-4 hidden">
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-lg w-full space-y-5 shadow-2xl relative">
+            <button type="button" onclick="toggleCloudModal()" class="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+            <div class="space-y-1">
+                <span class="px-2.5 py-0.5 bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] rounded-full">Multi-Device Sync (300+ Phones)</span>
+                <h2 class="text-lg font-black text-slate-900 dark:text-white">Connect Cloud Database (Firebase)</h2>
+                <p class="text-xs text-slate-500 dark:text-slate-400">
+                    Without a cloud database, static GitHub Pages only saves votes inside each person's own phone browser. Paste your free Firebase config below to generate a <strong>Cloud-Linked QR Code</strong> that sends all 300 phones' votes straight to your Host screen!
+                </p>
+            </div>
+            <div class="space-y-2">
+                <label class="block text-xs font-bold text-slate-700 dark:text-slate-300">Paste Firebase Config JSON or JS snippet:</label>
+                <textarea id="firebase-config-input" rows="5" placeholder='{"apiKey": "AIzaSy...", "authDomain": "...", "projectId": "..."}' class="w-full p-3 text-xs font-mono bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
+                <p class="text-[11px] text-slate-400">
+                    Tip: Create a free project at <strong>console.firebase.google.com</strong> &rarr; Firestore Database (Start in Test Mode) &rarr; Project Settings &rarr; Web App Config.
+                </p>
+            </div>
+            <div class="flex items-center justify-end gap-2 pt-2">
+                <button type="button" onclick="clearCloudConfig()" class="px-3.5 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors">
+                    Disconnect
+                </button>
+                <button type="button" onclick="saveCloudConfig()" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-colors">
+                    Save &amp; Enable Cloud QR
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Main App Container -->
     <div class="min-h-full flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
         
@@ -83,7 +117,7 @@
                     </div>
                 </div>
 
-                <!-- Security Status Badge (Participants never see Host Controls) -->
+                <!-- Security & Sync Status Badge -->
                 <div class="flex items-center gap-2">
                     <span id="connection-badge" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/50">
                         <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Single-Vote Protected
@@ -119,6 +153,11 @@
         const DEFAULT_POLL_ID = "TOGCC";
         const STORAGE_RECEIPT_KEY = "togcc_official_ballot_receipt_v1";
         const STORAGE_FP_KEY = "togcc_device_fp_v1";
+        const STORAGE_POLL_DATA_KEY = "togcc_shared_poll_store_v1";
+        const STORAGE_CLOUD_CFG_KEY = "togcc_firebase_cfg_v1";
+
+        // Optional: Paste your Firebase config directly here if you want it hardcoded in GitHub!
+        const HARDCODED_FIREBASE_CONFIG = null;
 
         const SUBSTANTIVE_RANKS = [
             {
@@ -170,8 +209,7 @@
             activeVoterPollId: DEFAULT_POLL_ID,
             isHostAuthorized: false,
             isSimulatingIncognito: false,
-            // Voter multi-page wizard state
-            voterPage: 1, // Page 1: Substantive Rank | Page 2: Free-text Nominees & Vice Chairman
+            voterPage: 1,
             selectedRankId: null,
             nominee1: '',
             nominee2: '',
@@ -181,13 +219,170 @@
 
         let cachedFingerprint = null;
         let isIncognitoDetected = false;
+        let firestoreDb = null;
+        let activeCloudConfig = null;
+        let encodedCloudConfigParam = null;
 
         // ==========================================
-        // 2. ANTI-INCOGNITO & PERSISTENT FINGERPRINTING
+        // 2. SAME-BROWSER PERSISTENCE & CROSS-TAB SYNC
+        // ==========================================
+        function savePollStoreLocally() {
+            try {
+                localStorage.setItem(STORAGE_POLL_DATA_KEY, JSON.stringify(state.polls));
+            } catch (e) {}
+        }
+
+        function loadPollStoreLocally() {
+            try {
+                const raw = localStorage.getItem(STORAGE_POLL_DATA_KEY);
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (parsed && typeof parsed === 'object') {
+                        state.polls = { ...state.polls, ...parsed };
+                    }
+                }
+            } catch (e) {}
+        }
+
+        // Listen for submissions made in another tab on the same browser!
+        window.addEventListener('storage', (event) => {
+            if (event.key === STORAGE_POLL_DATA_KEY && event.newValue) {
+                try {
+                    const updated = JSON.parse(event.newValue);
+                    if (updated) {
+                        state.polls = updated;
+                        renderApp();
+                    }
+                } catch (e) {}
+            }
+        });
+
+        // ==========================================
+        // 3. CLOUD SYNC (FIREBASE FIRESTORE) FOR 300+ PHONES
+        // ==========================================
+        function parseFlexibleConfig(rawText) {
+            if (!rawText) return null;
+            let cleaned = rawText.trim();
+            // Extract JSON object if user pasted full `const firebaseConfig = { ... };`
+            const firstBrace = cleaned.indexOf('{');
+            const lastBrace = cleaned.lastIndexOf('}');
+            if (firstBrace !== -1 && lastBrace !== -1) {
+                cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+            }
+            // Quote unquoted JS keys safely
+            cleaned = cleaned.replace(/(['"])?([a-zA-Z0-9_]+)(['"])?\s*:/g, '"$2":');
+            // Replace single quotes with double quotes
+            cleaned = cleaned.replace(/'/g, '"');
+            // Remove trailing commas
+            cleaned = cleaned.replace(/,\s*}/g, '}');
+            return JSON.parse(cleaned);
+        }
+
+        function initCloudDatabase(configObj) {
+            if (!configObj || !configObj.projectId || !window.firebase) return false;
+            try {
+                if (!firebase.apps.length) {
+                    firebase.initializeApp(configObj);
+                }
+                firestoreDb = firebase.firestore();
+                activeCloudConfig = configObj;
+                encodedCloudConfigParam = btoa(JSON.stringify(configObj));
+
+                const badge = document.getElementById('connection-badge');
+                if (badge) {
+                    badge.className = "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800";
+                    badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span> Cloud Live Sync`;
+                }
+                return true;
+            } catch (e) {
+                console.warn("Firebase init error:", e);
+                return false;
+            }
+        }
+
+        function subscribeHostToCloudPoll(pollId) {
+            if (!firestoreDb) return;
+            const pollRef = firestoreDb.collection('togcc_polls').doc(pollId);
+
+            // Listen to main poll lock status
+            pollRef.onSnapshot((docSnap) => {
+                if (docSnap.exists) {
+                    const data = docSnap.data();
+                    if (state.polls[pollId]) {
+                        state.polls[pollId].isLocked = !!data.isLocked;
+                        renderApp();
+                    }
+                } else {
+                    pollRef.set({ title: INITIAL_SEED_POLL.title, isLocked: false }, { merge: true });
+                }
+            });
+
+            // Listen to real-time submissions subcollection (handles 300+ concurrent phones cleanly)
+            pollRef.collection('submissions').orderBy('createdAt', 'desc').onSnapshot((querySnap) => {
+                const subs = [];
+                const counts = { TO_II: 0, TO_I: 0, STO: 0, CTO: 0 };
+                querySnap.forEach((doc) => {
+                    const d = doc.data();
+                    subs.push(d);
+                    if (d.rankId && counts[d.rankId] !== undefined) {
+                        counts[d.rankId]++;
+                    }
+                });
+                if (!state.polls[pollId]) {
+                    state.polls[pollId] = JSON.parse(JSON.stringify(INITIAL_SEED_POLL));
+                }
+                state.polls[pollId].submissions = subs;
+                state.polls[pollId].rankCounts = counts;
+                renderApp();
+            });
+        }
+
+        window.toggleCloudModal = function() {
+            const modal = document.getElementById('cloud-setup-modal');
+            if (!modal) return;
+            modal.classList.toggle('hidden');
+            const textarea = document.getElementById('firebase-config-input');
+            if (textarea && activeCloudConfig) {
+                textarea.value = JSON.stringify(activeCloudConfig, null, 2);
+            }
+        };
+
+        window.saveCloudConfig = function() {
+            const textarea = document.getElementById('firebase-config-input');
+            if (!textarea) return;
+            try {
+                const parsed = parseFlexibleConfig(textarea.value);
+                if (!parsed || !parsed.projectId) {
+                    showToast('Invalid Firebase config. Ensure projectId is included.', 'warning');
+                    return;
+                }
+                localStorage.setItem(STORAGE_CLOUD_CFG_KEY, JSON.stringify(parsed));
+                if (initCloudDatabase(parsed)) {
+                    subscribeHostToCloudPoll(state.activeHostPollId);
+                    toggleCloudModal();
+                    renderApp();
+                    showToast('Cloud Sync connected! Share the updated QR code with participants.', 'success');
+                }
+            } catch (e) {
+                showToast('Could not parse config JSON. Check formatting.', 'warning');
+            }
+        };
+
+        window.clearCloudConfig = function() {
+            localStorage.removeItem(STORAGE_CLOUD_CFG_KEY);
+            activeCloudConfig = null;
+            encodedCloudConfigParam = null;
+            firestoreDb = null;
+            toggleCloudModal();
+            renderApp();
+            showToast('Cloud Sync disconnected.', 'info');
+        };
+
+        // ==========================================
+        // 4. ANTI-INCOGNITO & PERSISTENT FINGERPRINTING
         // ==========================================
         async function detectIncognitoBrowser() {
             try {
-                // Storage quota check for Chromium Incognito
                 if (navigator.storage && navigator.storage.estimate) {
                     const { quota } = await navigator.storage.estimate();
                     if (quota && quota < 120000000) {
@@ -195,7 +390,6 @@
                         return;
                     }
                 }
-                // IndexedDB check for Firefox Private / Safari Private
                 const dbTest = indexedDB.open("togcc_priv_check");
                 dbTest.onerror = () => {
                     isIncognitoDetected = true;
@@ -209,7 +403,6 @@
         async function initSecurityChecks() {
             await detectIncognitoBrowser();
 
-            // Check if a persistent device ID was already created on this device
             let storedFp = null;
             try {
                 storedFp = localStorage.getItem(STORAGE_FP_KEY);
@@ -218,8 +411,6 @@
             try {
                 const nav = window.navigator;
                 const scr = window.screen;
-
-                // Canvas hardware rendering signature
                 let canvasSig = '';
                 try {
                     const canvas = document.createElement('canvas');
@@ -263,7 +454,10 @@
                 }
             } catch (e) {}
 
-            // Hydrate any previously recorded submission receipt from localStorage so page reload blocks re-voting
+            // Load local submissions first
+            loadPollStoreLocally();
+
+            // Hydrate personal receipt so device cannot re-vote
             try {
                 const savedReceiptRaw = localStorage.getItem(STORAGE_RECEIPT_KEY);
                 if (savedReceiptRaw) {
@@ -283,7 +477,7 @@
         }
 
         // ==========================================
-        // 3. INITIALIZATION
+        // 5. INITIALIZATION
         // ==========================================
         async function initApp() {
             await initSecurityChecks();
@@ -291,6 +485,7 @@
             const urlParams = new URLSearchParams(window.location.search);
             const pollParam = urlParams.get('poll');
             const hostParam = urlParams.get('host');
+            const cfgParam = urlParams.get('cfg');
 
             if (pollParam) {
                 const upperPoll = pollParam.toUpperCase();
@@ -303,14 +498,50 @@
                 }
             }
 
-            // Host projector is strictly hidden unless ?host=1 is explicitly provided in the URL
             state.isHostAuthorized = (hostParam === '1' || hostParam === 'true');
+
+            // Initialize Cloud Sync if provided in URL (?cfg=...), localStorage, or hardcoded
+            let cfgToUse = HARDCODED_FIREBASE_CONFIG;
+            if (cfgParam) {
+                try {
+                    cfgToUse = JSON.parse(atob(cfgParam));
+                    localStorage.setItem(STORAGE_CLOUD_CFG_KEY, JSON.stringify(cfgToUse));
+                } catch (e) {}
+            } else if (!cfgToUse) {
+                try {
+                    const savedCfg = localStorage.getItem(STORAGE_CLOUD_CFG_KEY);
+                    if (savedCfg) cfgToUse = JSON.parse(savedCfg);
+                } catch (e) {}
+            }
+
+            if (cfgToUse && initCloudDatabase(cfgToUse)) {
+                if (state.isHostAuthorized) {
+                    subscribeHostToCloudPoll(state.activeHostPollId);
+                } else if (firestoreDb) {
+                    // Single lightweight fetch for voter to check if poll is locked
+                    firestoreDb.collection('togcc_polls').doc(state.activeVoterPollId).get().then(snap => {
+                        if (snap.exists && snap.data().isLocked) {
+                            state.polls[state.activeVoterPollId].isLocked = true;
+                            renderApp();
+                        }
+                    }).catch(() => {});
+                }
+            }
 
             renderApp();
         }
 
+        function getParticipantShareUrl() {
+            const base = window.location.href.split('?')[0];
+            let url = `${base}?poll=${state.activeHostPollId}`;
+            if (encodedCloudConfigParam) {
+                url += `&cfg=${encodeURIComponent(encodedCloudConfigParam)}`;
+            }
+            return url;
+        }
+
         // ==========================================
-        // 4. CORE RENDER CONTROLLER
+        // 6. CORE RENDER CONTROLLER
         // ==========================================
         function renderApp() {
             const hostContainer = document.getElementById('view-host-container');
@@ -341,7 +572,7 @@
         }
 
         // ==========================================
-        // 5. HOST DASHBOARD RENDERER (ONLY VISIBLE WITH ?host=1)
+        // 7. HOST DASHBOARD RENDERER (ONLY VISIBLE WITH ?host=1)
         // ==========================================
         function renderHostDashboard() {
             const container = document.getElementById('view-host');
@@ -372,6 +603,37 @@
 
             let html = `
                 <div class="space-y-6">
+                    <!-- Cloud / Local Mode Warning Banner if not yet connected to Firebase -->
+                    ${!firestoreDb ? `
+                        <div class="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                            <div class="flex items-start gap-3">
+                                <div class="p-2 bg-amber-100 dark:bg-amber-900/50 text-amber-600 dark:text-amber-400 rounded-xl shrink-0">
+                                    <i data-lucide="wifi-off" class="w-4 h-4"></i>
+                                </div>
+                                <div>
+                                    <h3 class="text-xs font-black text-amber-900 dark:text-amber-200">Same-Browser Mode Active (GitHub Static Hosting)</h3>
+                                    <p class="text-[11px] text-amber-800 dark:text-amber-300/90 mt-0.5">
+                                        Votes submitted in another tab on <strong>this same browser</strong> appear here automatically. To collect votes from <strong>300 separate phones</strong>, connect a free Firebase Cloud database.
+                                    </p>
+                                </div>
+                            </div>
+                            <button type="button" onclick="toggleCloudModal()" class="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shrink-0 shadow-sm transition-colors">
+                                ⚡ Connect 300-Phone Cloud
+                            </button>
+                        </div>
+                    ` : `
+                        <div class="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl p-3.5 flex items-center justify-between gap-3">
+                            <div class="flex items-center gap-2.5 text-xs text-emerald-800 dark:text-emerald-300">
+                                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                                <span><strong>Cloud Sync Active:</strong> All 300+ smartphones scanning your QR code will stream votes directly here.</span>
+                            </div>
+                            <button type="button" onclick="toggleCloudModal()" class="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 underline">
+                                Cloud Settings
+                            </button>
+                        </div>
+                    `}
+
+                    <!-- Host Header Bar -->
                     <div class="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-5 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                         <div class="flex items-center gap-3.5">
                             <div class="px-3 py-2 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 rounded-2xl font-mono font-black text-sm border border-indigo-100 dark:border-indigo-900/50">
@@ -386,6 +648,9 @@
                             </div>
                         </div>
                         <div class="flex items-center gap-2 flex-wrap">
+                            <button type="button" onclick="refreshHostResults()" class="px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors">
+                                🔄 Refresh
+                            </button>
                             <button type="button" onclick="toggleLockPoll()" class="px-3 py-2 rounded-xl text-xs font-bold border ${poll.isLocked ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'} transition-colors">
                                 ${poll.isLocked ? '🔓 Unlock' : '🔒 Lock'}
                             </button>
@@ -527,7 +792,7 @@
         }
 
         // ==========================================
-        // 6. PARTICIPANT / VOTER RENDERER (2-PAGE FLOW)
+        // 8. PARTICIPANT / VOTER RENDERER (2-PAGE FLOW)
         // ==========================================
         function getExistingVoteReceipt(poll) {
             if (poll && poll.voters && cachedFingerprint && poll.voters[cachedFingerprint]) {
@@ -609,9 +874,6 @@
                     </div>
                 `;
             } else if (state.voterPage === 1) {
-                // ==========================================
-                // PAGE 1: SELECT SUBSTANTIVE RANK
-                // ==========================================
                 html += `
                     <div class="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-6 shadow-sm space-y-6 animate-fadeIn">
                         <div>
@@ -651,9 +913,6 @@
                     </div>
                 `;
             } else {
-                // ==========================================
-                // PAGE 2: NOMINATE STAFF (1 OR 2 BOXES) & VICE CHAIRMAN
-                // ==========================================
                 const rankObj = SUBSTANTIVE_RANKS.find(r => r.id === state.selectedRankId) || SUBSTANTIVE_RANKS[0];
                 const isCTO = rankObj.maxStaffNominations === 1;
 
@@ -674,7 +933,6 @@
                         </div>
 
                         <div class="space-y-4">
-                            <!-- Staff Nominee 1 (Required for all ranks) -->
                             <div>
                                 <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
                                     ${isCTO ? 'Nominated Member of Staff (1 Only)' : 'Nominated Member of Staff #1'} <span class="text-rose-500">*</span>
@@ -682,7 +940,6 @@
                                 <input type="text" id="input-nominee-1" value="${escapeHtml(state.nominee1)}" oninput="state.nominee1 = this.value" placeholder="Type full name of officer..." class="w-full p-3 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
                             </div>
 
-                            <!-- Staff Nominee 2 (Shown for TO II, TO I, STO; hidden for CTO) -->
                             ${!isCTO ? `
                                 <div>
                                     <label class="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
@@ -696,7 +953,6 @@
                                 </div>
                             `}
 
-                            <!-- Vice Chairman of Choice (Shown for all ranks) -->
                             <div class="pt-3 border-t border-slate-100 dark:border-slate-800">
                                 <label class="block text-xs font-bold text-violet-700 dark:text-violet-300 mb-1.5">
                                     Vice Chairman of Choice <span class="text-rose-500">*</span>
@@ -726,7 +982,7 @@
         }
 
         // ==========================================
-        // 7. INTERACTIVE WIZARD & HOST ACTIONS
+        // 9. INTERACTIVE WIZARD & HOST ACTIONS
         // ==========================================
         function selectSubstantiveRank(rankId) {
             state.selectedRankId = rankId;
@@ -750,11 +1006,11 @@
             renderParticipantView();
         }
 
-        function submitNominationBallot() {
-            const poll = state.polls[state.activeVoterPollId];
+        async function submitNominationBallot() {
+            const pollId = state.activeVoterPollId;
+            const poll = state.polls[pollId];
             if (!poll) return;
 
-            // Block duplicate submission if already recorded
             if (getExistingVoteReceipt(poll)) {
                 showToast('You have already submitted your ballot.', 'warning');
                 renderApp();
@@ -794,29 +1050,43 @@
 
             const nomineesList = isCTO ? [n1] : [n1, n2];
             const voteRecord = {
-                rankId: rankObj.id,
-                rankTitle: rankObj.title,
-                nominees: nomineesList,
-                viceChairman: vc,
-                votedAt: Date.now()
-            };
-
-            poll.voters[cachedFingerprint] = voteRecord;
-            poll.rankCounts[rankObj.id] = (poll.rankCounts[rankObj.id] || 0) + 1;
-
-            poll.submissions.unshift({
                 id: 'sub-' + Math.random().toString(36).substring(2, 9),
                 rankId: rankObj.id,
                 rankTitle: rankObj.title,
                 nominees: nomineesList,
                 viceChairman: vc,
+                votedAt: Date.now(),
                 createdAt: Date.now()
-            });
+            };
 
-            // Persist receipt in localStorage so user cannot resubmit by refreshing
+            // If Cloud Sync (Firebase) is active, write directly using fingerprint as doc ID (enforces 1 vote per device)
+            if (firestoreDb) {
+                try {
+                    const subRef = firestoreDb.collection('togcc_polls').doc(pollId).collection('submissions').doc(cachedFingerprint);
+                    const existingDoc = await subRef.get();
+                    if (existingDoc.exists) {
+                        showToast('A ballot from this device was already recorded.', 'warning');
+                        poll.voters[cachedFingerprint] = existingDoc.data();
+                        renderApp();
+                        return;
+                    }
+                    await subRef.set(voteRecord);
+                } catch (err) {
+                    console.warn('Cloud submission fallback to local:', err);
+                }
+            }
+
+            poll.voters[cachedFingerprint] = voteRecord;
+            poll.rankCounts[rankObj.id] = (poll.rankCounts[rankObj.id] || 0) + 1;
+            poll.submissions.unshift(voteRecord);
+
+            // Save to shared localStorage (immediately notifies any open Host tab in same browser)
+            savePollStoreLocally();
+
+            // Persist personal receipt so user cannot resubmit on page refresh
             try {
                 localStorage.setItem(STORAGE_RECEIPT_KEY, JSON.stringify({
-                    pollId: state.activeVoterPollId,
+                    pollId: pollId,
                     fp: cachedFingerprint,
                     voteData: voteRecord
                 }));
@@ -826,13 +1096,28 @@
             renderApp();
         }
 
-        function toggleLockPoll() {
-            const poll = state.polls[state.activeHostPollId];
-            if (poll) {
-                poll.isLocked = !poll.isLocked;
-                renderApp();
-                showToast(poll.isLocked ? 'Voting locked.' : 'Voting unlocked.', 'info');
+        function refreshHostResults() {
+            loadPollStoreLocally();
+            renderApp();
+            showToast('Results refreshed.', 'info');
+        }
+
+        async function toggleLockPoll() {
+            const pollId = state.activeHostPollId;
+            const poll = state.polls[pollId];
+            if (!poll) return;
+
+            poll.isLocked = !poll.isLocked;
+            savePollStoreLocally();
+
+            if (firestoreDb) {
+                try {
+                    await firestoreDb.collection('togcc_polls').doc(pollId).set({ isLocked: poll.isLocked }, { merge: true });
+                } catch (e) {}
             }
+
+            renderApp();
+            showToast(poll.isLocked ? 'Voting locked.' : 'Voting unlocked.', 'info');
         }
 
         function toggleRankFilter(rankId) {
@@ -852,7 +1137,7 @@
                 if (target && window.QRCode) {
                     target.innerHTML = '';
                     new QRCode(target, {
-                        text: window.location.href.split('?')[0] + '?poll=' + state.activeHostPollId,
+                        text: getParticipantShareUrl(),
                         width: 220,
                         height: 220
                     });
@@ -861,7 +1146,7 @@
         }
 
         function copyPollLink() {
-            const url = window.location.href.split('?')[0] + '?poll=' + state.activeHostPollId;
+            const url = getParticipantShareUrl();
             const textarea = document.createElement('textarea');
             textarea.value = url;
             document.body.appendChild(textarea);
@@ -880,7 +1165,7 @@
             if (hostContainer && window.QRCode) {
                 hostContainer.innerHTML = '';
                 new QRCode(hostContainer, {
-                    text: window.location.href.split('?')[0] + '?poll=' + state.activeHostPollId,
+                    text: getParticipantShareUrl(),
                     width: 136,
                     height: 136
                 });
